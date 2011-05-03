@@ -1,0 +1,395 @@
+/*
+ * Copyright (c) 2010 Marc Dirix <marc@electronics-design.nl>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include <sensors/sensors.h>
+#include "util.h"
+
+typedef unsigned char uchar;
+
+
+/* Global variables
+ */
+
+
+/*! @module Public
+ */
+
+/*! @module IO
+ */
+
+/*! @class LMSensors
+ */
+
+DECLARATIONS
+
+PIKECLASS _sensors 
+{
+
+   FILE *config_file;
+
+   static void open_config_file(const char* config_file_name)
+   {
+      config_file = fopen(config_file_name, "r");
+      if (!config_file) 
+      {
+         Pike_error("Could not open config file\n");
+         perror(config_file_name);
+         exit(1);
+      }
+   }
+
+   static void close_config_file(const char* config_file_name)
+   {
+      if (fclose(config_file) == EOF) 
+      {
+         Pike_error("Could not close config file\n");
+         perror(config_file_name);
+      }
+   }
+/*! @decl void create(string config_file_name)
+*/
+   PIKEFUN void create(string config_file_name)
+   {
+      int res=0; 
+
+      open_config_file(config_file_name->str);
+      res = sensors_init(config_file);
+   //FIXME ERROR IF RES>0
+      close_config_file(config_file_name->str);
+      pop_n_elems(args);
+ 
+   }
+
+   const char *sprintf_chip_name(sensors_chip_name *name)
+   {
+      #define BUF_SIZE 200
+      static char buf[BUF_SIZE];
+      if(sensors_snprintf_chip_name(buf, BUF_SIZE, name) < 0)
+         return NULL;
+      return buf;
+   }
+
+   static struct pike_string*low_getchip_name(const sensors_chip_name *chip)
+   {
+      struct pike_string*retval;
+      struct pike_string*chip_name;
+      uchar*p=0;
+      uchar*c=0;
+      int length;
+      
+      c=sprintf_chip_name(chip);
+      length=strlen((const uchar*) c);
+      retval=begin_shared_string(length);
+      p=(uchar*)retval->str;
+     
+      memcpy(p,c,length);
+      return low_end_shared_string(retval);
+   }
+
+
+
+
+   PIKEFUN array list_sensors()
+   {
+   
+      const sensors_chip_name *chip;
+      int chip_nr;
+      struct svalue *save_sp;
+      
+      save_sp = Pike_sp;
+   
+      for (chip_nr = 0; (chip = sensors_get_detected_chips(NULL, &chip_nr));)
+         push_string(low_getchip_name(chip));
+      f_aggregate(Pike_sp - save_sp);
+   }
+
+   static float get_value(const sensors_chip_name *name,
+                           const sensors_subfeature *sub)
+   {
+      double val;
+      int err;
+
+      err = sensors_get_value(name, sub->number, &val);
+      if (err) {
+         Pike_error("Can't get value of subfeature %s: %s\n",
+                      sub->name, sensors_strerror(err));
+         val = 0;
+      }
+      return (float) val;
+   }
+   
+   int push_chip_temp(const sensors_chip_name *name, 
+                  const sensors_feature *feature)
+   {
+      const sensors_subfeature *sf, *sflim ;
+      double val;
+      int alarm, crit_displayed = 0;
+      int map_cnt=0;
+
+      sf = sensors_get_subfeature(name, feature,
+                                    SENSORS_SUBFEATURE_TEMP_ALARM);
+      alarm = sf && get_value(name, sf);
+      
+      sflim = sensors_get_subfeature(name, feature,
+                                       SENSORS_SUBFEATURE_TEMP_MAX);
+      if (sflim) 
+      {
+         sf = sensors_get_subfeature(name, feature,
+                                        SENSORS_SUBFEATURE_TEMP_MAX_ALARM);
+         if (sf && get_value(name, sf))
+            alarm |= 1;
+         push_text("high"); push_float(get_value(name, sflim));
+         map_cnt++;
+      }
+
+
+      sflim = sensors_get_subfeature(name, feature,
+                                       SENSORS_SUBFEATURE_TEMP_MIN);
+      if (sflim) 
+      {
+         sf = sensors_get_subfeature(name, feature,
+                                        SENSORS_SUBFEATURE_TEMP_MIN_ALARM);
+         if (sf && get_value(name, sf))
+            alarm |= 1;
+         push_text("high"); push_float(get_value(name, sflim));
+         map_cnt++;
+      }
+      sflim = sensors_get_subfeature(name, feature,
+                                        SENSORS_SUBFEATURE_TEMP_CRIT);
+      if (sflim) 
+      {
+         sf = sensors_get_subfeature(name, feature,
+                                        SENSORS_SUBFEATURE_TEMP_CRIT_ALARM);
+         if (sf && get_value(name, sf))
+         {
+            alarm |= 1;
+            crit_displayed = 1;
+         }
+         push_text("crit"); push_float(get_value(name, sflim));
+         map_cnt++;
+      }
+      sflim = sensors_get_subfeature(name, feature,
+                                        SENSORS_SUBFEATURE_TEMP_MAX_HYST);
+      if (sflim) 
+      {
+         push_text("hyst"); push_float(get_value(name, sflim));
+         map_cnt++;
+      }
+      sflim = sensors_get_subfeature(name, feature,
+                                        SENSORS_SUBFEATURE_TEMP_CRIT_HYST);
+      if (sflim) 
+      {
+         push_text("hyst"); push_float(get_value(name, sflim));
+         map_cnt++;
+      }
+      sf = sensors_get_subfeature(name, feature,
+                                        SENSORS_SUBFEATURE_TEMP_CRIT_ALARM);
+      if (sf && get_value(name, sf))
+      {
+         alarm |= 1;
+         crit_displayed = 1;
+      }
+
+      if(alarm)
+      {
+         push_text("alarm"); push_int(1);
+         map_cnt++;
+      }
+      if(crit_displayed)
+      {
+         push_text("crit_displayed"); push_int(1);
+         map_cnt++;
+      }
+      sf = sensors_get_subfeature(name, feature,
+                                   SENSORS_SUBFEATURE_TEMP_INPUT);
+      if(sf)
+      {
+         push_text("input"); push_float(get_value(name,sf));
+         map_cnt++;
+      }
+      return map_cnt;
+   }
+   
+   int push_chip_in(const sensors_chip_name *name, 
+                  const sensors_feature *feature)
+   {
+      const sensors_subfeature *sf;
+      double val;
+      int map_cnt=0;
+
+      sf = sensors_get_subfeature(name, feature,
+                                    SENSORS_SUBFEATURE_IN_INPUT);
+      if(sf)
+      {
+         push_text("input"); push_float(get_value(name,sf));
+         map_cnt++;
+      }
+      return map_cnt;
+   }
+
+   int push_chip_fan(const sensors_chip_name *name, 
+                  const sensors_feature *feature)
+   {
+      const sensors_subfeature *sf;
+      double val;
+      int map_cnt=0;
+      sf = sensors_get_subfeature(name, feature,
+                                    SENSORS_SUBFEATURE_FAN_INPUT);
+      if(sf)
+      {
+         push_text("input"); push_float(get_value(name,sf));
+         map_cnt++;
+      }
+      return map_cnt;
+   }
+
+   int push_chip_power(const sensors_chip_name *name, 
+                  const sensors_feature *feature)
+   {
+      const sensors_subfeature *sf;
+      double val;
+      int map_cnt=0;
+      sf = sensors_get_subfeature(name, feature,
+                                    SENSORS_SUBFEATURE_POWER_INPUT);
+      if(sf)
+      {
+         push_text("input"); push_float(get_value(name,sf));
+         map_cnt++;
+      }
+      return map_cnt;
+   }
+   
+   int push_chip_energy(const sensors_chip_name *name, 
+                  const sensors_feature *feature)
+   {
+      const sensors_subfeature *sf;
+      double val;
+      int map_cnt=0;
+      sf = sensors_get_subfeature(name, feature,
+                                    SENSORS_SUBFEATURE_ENERGY_INPUT);
+      if(sf)
+      {
+         push_text("input"); push_float(get_value(name,sf));
+         map_cnt++;
+      }
+      return map_cnt;
+   }
+
+   int push_chip_curr(const sensors_chip_name *name, 
+                  const sensors_feature *feature)
+   {
+      const sensors_subfeature *sf;
+      double val;
+      int map_cnt=0;
+      sf = sensors_get_subfeature(name, feature,
+                                    SENSORS_SUBFEATURE_CURR_INPUT);
+      if(sf)
+      {
+         push_text("input"); push_float(get_value(name,sf));
+         map_cnt++;
+      }
+      return map_cnt;
+   }
+
+   PIKEFUN mapping get_sensor_data(string sensorname)
+   {  
+      const sensors_chip_name chip;
+      const sensors_chip_name *name ;
+      const sensors_feature *feature;
+      const sensors_subfeature *sf;
+      int a,b,err,map_cnt,chip_nr=0;
+      int valid;
+      char *label;
+      double val;
+      struct svalue *save_sp;
+
+      if(sensors_parse_chip_name((uchar *) sensorname->str, &chip))
+      {
+         Pike_error("Unknown Sensor: %s\n",sensorname->str);
+      }
+      pop_n_elems(args);
+      save_sp = Pike_sp;
+      for (chip_nr = 0; (name = sensors_get_detected_chips(&chip, &chip_nr));)
+      {
+         a=0;
+         while ((feature = sensors_get_features(name, &a))) 
+         {
+            if (!(label = sensors_get_label(name, feature)))
+            {
+               Pike_error("Can't get label of feature %s!\n", feature->name);
+            }
+            push_text("label"); push_text(label); free(label);
+            map_cnt=1;
+            switch (feature->type)
+            {
+               case SENSORS_FEATURE_TEMP:
+                  push_text("type"); push_text("temp");
+                  map_cnt++;
+                  map_cnt+=push_chip_temp(name, feature);
+                  break;
+               case SENSORS_FEATURE_IN:
+                  push_text("type"); push_text("in");
+                  map_cnt++;
+                  map_cnt+=push_chip_in(name, feature);
+                  break;
+               case SENSORS_FEATURE_FAN:
+                  push_text("type"); push_text("fan");
+                  map_cnt++;
+                  map_cnt+=push_chip_fan(name, feature);
+                  break;
+               case SENSORS_FEATURE_POWER:
+                  push_text("type"); push_text("power");
+                  map_cnt++;
+                  map_cnt+=push_chip_power(name, feature);
+                  break;
+               case SENSORS_FEATURE_ENERGY:
+                  push_text("type"); push_text("energy");
+                  map_cnt++;
+                  map_cnt+=push_chip_energy(name, feature);
+                  break;
+               case SENSORS_FEATURE_CURR:
+                  push_text("type"); push_text("current");
+                  map_cnt++;
+                  map_cnt+=push_chip_curr(name, feature);
+                  break;
+               default:
+                  continue;
+               
+            }
+/*
+            b = 0;
+            while (( sub = sensors_get_all_subfeatures(name, feature, &b)))
+            {
+               if (sub->flags & SENSORS_MODE_R) 
+               {
+                  if ((err = sensors_get_value(name, sub->number, &val)))
+                     Pike_error("Can't get value of subfeature %s: %s\n",
+                                   sub->name, sensors_strerror(err));
+                  else
+                  {
+                     push_text(sub->name); push_float((float) val);
+                     map_cnt++;
+                  }
+               }
+            }
+*/
+             if(map_cnt > 0)
+                f_aggregate_mapping(map_cnt*2);
+         }
+      }
+      f_aggregate(Pike_sp - save_sp);
+   }
+}

@@ -1,0 +1,14 @@
+@make_variables@
+VPATH=@srcdir@
+OBJS=sensors_glue.o
+MODULE_LDFLAGS=@LDFLAGS@ @LIBS@
+CONFIG_HEADERS=@CONFIG_HEADERS@
+MODDIR=Public.pmod/IO.pmod/
+MODNAME=LMSensors
+MODULE_PMOD_IN=module.pmod.in
+
+@dynamic_module_makefile@
+
+sensors_glue.o: $(SRCDIR)/sensors_glue.c
+
+@dependencies@

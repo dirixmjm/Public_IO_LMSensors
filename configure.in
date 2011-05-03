@@ -1,0 +1,15 @@
+AC_INIT(sensors_glue.cmod)
+
+AC_MODULE_INIT()
+
+
+AC_CHECK_HEADERS(sensors/sensors.h)
+if test $ac_cv_header_sensors_sensors_h = yes ; then
+   LIBS="${LIBS-} -lsensors"
+fi
+#LIBS="${LIBS-} -lsensors"
+
+
+AC_SUBST(CS_INCLUDES)
+
+AC_OUTPUT(Makefile)
